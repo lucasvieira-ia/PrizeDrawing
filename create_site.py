@@ -63,11 +63,9 @@ BALL_COLUMNS = ["Bola1", "Bola2", "Bola3", "Bola4", "Bola5", "Bola6"]
 
 
 def processar_dados_totais():
-    # 1. Carrega e limpa os dados
     df = pd.read_csv(io.StringIO(RAW_DATA), sep="\t")
     df[BALL_COLUMNS] = df[BALL_COLUMNS].astype(int)
 
-    # 2. Análise Concurso por Concurso (Do primeiro ao último)
     draws_list = []
     df_reset = df.reset_index(drop=True)
 
@@ -76,18 +74,6 @@ def processar_dados_totais():
         evens = sum(1 for n in current_numbers if n % 2 == 0)
         odds = sum(1 for n in current_numbers if n % 2 != 0)
 
-        repeats_output = "N/A"
-        if i > 0:
-            previous_numbers = set(
-                df_reset.iloc[i - 1][BALL_COLUMNS].astype(int).tolist()
-            )
-            intersection = set(current_numbers).intersection(previous_numbers)
-            repeats_output = (
-                f"{len(intersection)} número(s) -> {sorted(list(intersection))}"
-                if intersection
-                else "Nenhum"
-            )
-
         draws_list.append(
             {
                 "id": int(row["Concurso"]),
@@ -95,28 +81,256 @@ def processar_dados_totais():
                 "numbers": current_numbers,
                 "evens": evens,
                 "odds": odds,
-                "repeats": repeats_output,
             }
         )
 
-    # Exporta os dados brutos estruturados para JSON dentro do HTML
     return json.dumps(draws_list)
 
 
-# Gerar a string JSON com os dados
+# Gerar a string JSON com os dados tratados do Pandas
 dados_json = processar_dados_totais()
 
-# Ler o template original do seu HTML
-with open("templates/index.html", "r", encoding="utf-8") as f:
-    html_template = f.read()
+# String contendo a estrutura pura e o motor em Javascript da aplicação
+TEMPLATE_HTML = """<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Estatístico de Sorteios</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .lottery-ball {
+            display: inline-block;
+            width: 38px;
+            height: 38px;
+            line-height: 38px;
+            background-color: #6c757d;
+            color: #fff;
+            border-radius: 50%;
+            text-align: center;
+            font-weight: 700;
+            font-size: 1rem;
+            box-shadow: inset -3px -3px 6px rgba(0, 0, 0, 0.3), 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .bg-gradient-header {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+        }
+    </style>
+</head>
+<body class="bg-light text-dark">
 
-# Injetar os dados dentro de uma tag <script> no HTML
-html_final = html_template.replace(
-    "<!-- DATA_INJECTION_PLACEHOLDER -->", f"const SorteiosData = {dados_json};"
-)
+    <div class="bg-gradient-header text-white text-center py-5 mb-5 shadow">
+        <div class="container">
+            <h1 class="display-5 fw-bold m-0">📊 Painel Estatístico de Sorteios</h1>
+            <p class="lead opacity-75 mt-2 mb-0">Análise dos resultados da Mega-Sena</p>
+        </div>
+    </div>
 
-# Salvar como index.html na raiz (pronto para o GitHub Pages)
+    <div class="container">
+        <div class="card border-0 shadow-sm p-4 mb-5 rounded-4 bg-white">
+            <div class="row align-items-center g-3">
+                <div class="col-md-5 col-lg-4">
+                    <label for="limit" class="form-label fw-semibold text-secondary mb-2">📦 Quantidade de registros analisados:</label>
+                    <select class="form-select form-select-lg border-2" id="limit" onchange="renderizarPainel(this.value)">
+                        <option value="all">Todos os sorteios disponíveis</option>
+                        <option value="20">Últimos 20 sorteios</option>
+                        <option value="10">Últimos 10 sorteios</option>
+                        <option value="5">Últimos 5 sorteios</option>
+                    </select>
+                </div>
+                <div class="col-md-7 col-lg-8 text-md-end text-muted fs-6 mt-md-4 pt-md-2">
+                    <span class="badge bg-success p-2 opacity-75">Client Side</span>
+                    Processamento feito direto no navegador.
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-5">
+            <div class="col-lg-4 col-md-6">
+                <div class="card border-0 shadow-sm h-100 rounded-4 overflow-hidden">
+                    <div class="card-header bg-success text-white py-3 border-0 fw-bold fs-5">🔥 Números Mais Frequentes</div>
+                    <div class="card-body p-4 bg-white">
+                        <table class="table table-borderless table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Dezena</th>
+                                    <th class="text-end">Frequência</th>
+                                </tr>
+                            </thead>
+                            <tbody id="container-mais-frequentes"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-6">
+                <div class="card border-0 shadow-sm h-100 rounded-4 overflow-hidden">
+                    <div class="card-header bg-danger text-white py-3 border-0 fw-bold fs-5">❄️ Números Menos Frequentes</div>
+                    <div class="card-body p-4 bg-white">
+                        <table class="table table-borderless table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Dezena</th>
+                                    <th class="text-end">Frequência</th>
+                                </tr>
+                            </thead>
+                            <tbody id="container-menos-frequentes"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4 col-md-12">
+                <div class="card border-0 shadow-sm h-100 rounded-4 overflow-hidden">
+                    <div class="card-header bg-primary text-white py-3 border-0 fw-bold fs-5">⚖️ Distribuição de Paridade</div>
+                    <div class="card-body p-4 bg-white d-flex flex-column justify-content-center">
+                        <p class="text-muted mb-3 fs-6">
+                            Amostra total de números avaliados: <strong class="text-dark" id="parity-total">0</strong>
+                        </p>
+
+                        <div class="progress mb-4 rounded-pill" style="height: 24px;">
+                            <div id="bar-evens" class="progress-bar bg-info fw-bold" role="progressbar"></div>
+                            <div id="bar-odds" class="progress-bar bg-warning fw-bold text-dark" role="progressbar"></div>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <span class="d-block text-muted small">Total de Pares</span>
+                                <h4 class="text-info fw-bold m-0" id="text-evens">0</h4>
+                            </div>
+                            <div class="text-end">
+                                <span class="d-block text-muted small">Total de Ímpares</span>
+                                <h4 class="text-warning fw-bold m-0" id="text-odds">0</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-5">
+            <div class="card-header bg-dark text-white py-3 fw-bold fs-5">📅 Detalhamento Histórico Sorteio por Sorteio</div>
+            <div class="card-body p-0 bg-white">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0 align-middle">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="ps-4">Concurso</th>
+                                <th>Data do Sorteio</th>
+                                <th style="min-width: 280px;">Dezenas Sorteadas</th>
+                                <th class="text-center">Pares</th>
+                                <th class="text-center">Ímpares</th>
+                                <th class="pe-4">Repetidos do Concurso Anterior</th>
+                            </tr>
+                        </thead>
+                        <tbody id="container-tabela-sorteios"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        const SorteiosData = @@DADOS_JSON@@;
+
+        function renderizarPainel(limit) {
+            const dadosFiltrados = limit === 'all' ? SorteiosData : SorteiosData.slice(0, parseInt(limit, 10));
+
+            const contagem = {};
+            const todasAsBolas = [];
+
+            dadosFiltrados.forEach((draw) => {
+                draw.numbers.forEach((num) => {
+                    contagem[num] = (contagem[num] || 0) + 1;
+                    todasAsBolas.push(num);
+                });
+            });
+
+            const ordenados = Object.entries(contagem).sort((a, b) => b[1] - a[1]);
+            const maisFrequentes = ordenados.slice(0, 5);
+            const maisFrequentesKeys = maisFrequentes.map(([num]) => Number(num));
+            const menosFrequentes = ordenados.filter(([num]) => !maisFrequentesKeys.includes(Number(num))).slice(-5);
+
+            let htmlMais = '';
+            maisFrequentes.forEach(([num, freq]) => {
+                htmlMais += `<tr><td><span class="lottery-ball bg-success">${num}</span></td><td class="text-end text-success fw-bold fs-5">${freq}x</td></tr>`;
+            });
+            document.getElementById('container-mais-frequentes').innerHTML = htmlMais || '<tr><td colspan="2" class="text-muted">Sem dados</td></tr>';
+
+            let htmlMenos = '';
+            menosFrequentes.forEach(([num, freq]) => {
+                htmlMenos += `<tr><td><span class="lottery-ball bg-danger">${num}</span></td><td class="text-end text-danger fw-bold fs-5">${freq}x</td></tr>`;
+            });
+            document.getElementById('container-menos-frequentes').innerHTML = htmlMenos || '<tr><td colspan="2" class="text-muted">Sem dados</td></tr>';
+
+            const totalNumeros = todasAsBolas.length;
+            const totalPares = todasAsBolas.filter((n) => n % 2 === 0).length;
+            const totalImpares = totalNumeros - totalPares;
+            const pctPares = totalNumeros > 0 ? ((totalPares / totalNumeros) * 100).toFixed(2) : '0.00';
+            const pctImpares = totalNumeros > 0 ? ((totalImpares / totalNumeros) * 100).toFixed(2) : '0.00';
+
+            document.getElementById('parity-total').innerText = String(totalNumeros);
+            document.getElementById('text-evens').innerHTML = `${totalPares} <span class="fs-6 fw-normal text-muted">(${pctPares}%)</span>`;
+            document.getElementById('text-odds').innerHTML = `${totalImpares} <span class="fs-6 fw-normal text-muted">(${pctImpares}%)</span>`;
+
+            document.getElementById('bar-evens').style.width = pctPares + '%';
+            document.getElementById('bar-evens').innerText = pctPares + '%';
+            document.getElementById('bar-odds').style.width = pctImpares + '%';
+            document.getElementById('bar-odds').innerText = pctImpares + '%';
+
+            let htmlTabela = '';
+
+            dadosFiltrados.forEach((draw, index) => {
+                const bolasHtml = draw.numbers.map((n) => `<span class="lottery-ball bg-secondary">${n}</span>`).join(' ');
+
+                let repetidosTexto = 'Primeiro da lista';
+                if (index > 0) {
+                    const prevDraw = dadosFiltrados[index - 1];
+                    const inter = draw.numbers.filter((n) => prevDraw.numbers.includes(n));
+                    repetidosTexto = inter.length > 0
+                        ? `<span class="text-danger fw-semibold small">🔄 ${inter.length} número(s) -> [${inter.join(', ')}]</span>`
+                        : '🟢 Nenhum';
+                }
+
+                htmlTabela += `
+                    <tr>
+                        <td class="ps-4">
+                            <span class="badge bg-dark rounded-pill px-3 py-2 fs-6">#${draw.id}</span>
+                        </td>
+                        <td class="text-secondary fw-semibold">${draw.date}</td>
+                        <td>
+                            <div class="d-flex gap-1 py-1">${bolasHtml}</div>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-info text-dark fs-6 rounded-pill px-3">${draw.evens}</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-warning text-dark fs-6 rounded-pill px-3">${draw.odds}</span>
+                        </td>
+                        <td class="pe-4">${repetidosTexto}</td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('container-tabela-sorteios').innerHTML = htmlTabela || '<tr><td colspan="6" class="text-muted text-center py-3">Sem dados</td></tr>';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const limitSelect = document.getElementById('limit');
+            if (limitSelect) {
+                limitSelect.value = 'all';
+            }
+            renderizarPainel('all');
+        });
+    </script>
+
+"""
+html_finalizado = TEMPLATE_HTML.replace("@@DADOS_JSON@@", dados_json)
+
+# Abre e grava o conteúdo gerado no arquivo local index.html
 with open("index.html", "w", encoding="utf-8") as f:
-    f.write(html_final)
+    f.write(html_finalizado)  # CORRIGIDO: Nome da variável ajustado para português
 
-print("✨ Arquivo index.html estático gerado com sucesso para o GitHub Pages!")
+print("✨ Sucesso! O arquivo 'index.html' estático e unificado foi gerado corretamente.")
