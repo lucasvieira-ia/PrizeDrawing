@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "create_site.py"
@@ -34,3 +36,13 @@ def test_process_total_data_filters_only_2026_rows(monkeypatch, tmp_path):
     assert payload[0]["numbers"] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     assert payload[0]["evens"] == 7
     assert payload[0]["odds"] == 8
+
+
+def test_process_total_data_raises_when_csv_is_missing(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    spec = importlib.util.spec_from_file_location("create_site_test_module_missing", MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(FileNotFoundError, match="lotofacil.csv"):
+        spec.loader.exec_module(module)
