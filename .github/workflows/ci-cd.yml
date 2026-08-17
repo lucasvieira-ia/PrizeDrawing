@@ -33,7 +33,8 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-
+    
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
